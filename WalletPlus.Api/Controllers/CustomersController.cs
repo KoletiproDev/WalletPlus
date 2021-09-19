@@ -30,35 +30,34 @@ namespace WalletPlus.Api.Controllers
         }
 
         [HttpGet]
-        // Can be used to override global caching on a particular endpoGuid at any poGuid. 
         ////[HttpCacheExpiration(CacheLocation = CacheLocation.Public, MaxAge = 60)]
         ////[HttpCacheValidation(MustRevalidate = false)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetCustomers([FromQuery] RequestParams requestParams)
         {
-            var customers = await _unitOfWork.Customers.GetPagedList(requestParams);
+            var customers = await _unitOfWork.Customers.GetPagedList(requestParams, include: q => q.Include(x => x.Wallets).Include(x => x.Transactions));
             var results = _mapper.Map<IList<CustomerModel>>(customers);
             return Ok(results);
         }
 
-        [HttpGet("{id:Guid}", Name = "GetCustomer")]
-        [ResponseCache(CacheProfileName = "120SecondsDuration")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> GetCustomer(Guid id)
-        {
-            var customer = await _unitOfWork.Customers.Get(q => q.Id == id, include: q => q.Include(x => x.Wallets));
-            var result = _mapper.Map<CustomerModel>(customer);
-            return Ok(result);
-        }
+        //[HttpGet("{id:Guid}", Name = "GetCustomer")]
+        //[ResponseCache(CacheProfileName = "120SecondsDuration")]
+        //[ProducesResponseType(StatusCodes.Status200OK)]
+        //[ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        //public async Task<IActionResult> GetCustomer(Guid id)
+        //{
+        //    var customer = await _unitOfWork.Customers.Get(q => q.Id == id, include: q => q.Include(x => x.Wallets));
+        //    var result = _mapper.Map<CustomerModel>(customer);
+        //    return Ok(result);
+        //}
 
-        [HttpGet("{id}/transactions")]
+        [HttpGet("{customerId:Guid}/transactions", Name = "GetCustomerTransactions")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> GetCustomerTransactions(Guid id)
+        public async Task<IActionResult> GetCustomerTransactions(Guid customerId)
         {
-            var transactions = await _unitOfWork.Transactions.GetAll(c=> c.CustomerId == id , include: q => q.Include(x => x.Customer));
+            var transactions = await _unitOfWork.Transactions.GetAll(c=> c.CustomerId == customerId || c.BeneficiaryCustomerId == customerId, include: q => q.Include(x => x.Customer).Include(x=> x.BeneficiaryCustomer));
             var results = _mapper.Map<IList<TransactionModel>>(transactions);
             return Ok(results);
         }
@@ -76,7 +75,33 @@ namespace WalletPlus.Api.Controllers
             }
 
             var customer = _mapper.Map<Customer>(customerModel);
+
+            customer.Id = Guid.NewGuid();
+            customer.Active = true;
+
             await _unitOfWork.Customers.Insert(customer);
+
+            //create wallet
+            var transactionWallet = new Wallet
+            {
+                Id = Guid.NewGuid(),
+                CustomerId = customer.Id,
+                Type = WalletTypeEnum.Transactional,
+                Amount = 0,
+                CreatedDate = DateTime.Now 
+            };
+            await _unitOfWork.Wallets.Insert(transactionWallet);
+
+            var pointWallet = new Wallet
+            {
+                Id = Guid.NewGuid(),
+                CustomerId = customer.Id,
+                Type = WalletTypeEnum.Point,
+                Amount = 0,
+                CreatedDate = DateTime.Now
+            };
+            await _unitOfWork.Wallets.Insert(pointWallet);
+
             await _unitOfWork.Save();
 
             return CreatedAtRoute("GetCustomer", new { id = customer.Id }, customer);
@@ -104,32 +129,6 @@ namespace WalletPlus.Api.Controllers
 
             _mapper.Map(customerModel, customer);
             _unitOfWork.Customers.Update(customer);
-            await _unitOfWork.Save();
-
-            return NoContent();
-
-        }
-
-        [HttpDelete("{id:guid}")]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> DeleteCustomer(Guid id)
-        {
-            if (id == Guid.Empty)
-            {
-                _logger.LogError($"Invalid delete attempt in {nameof(DeleteCustomer)}");
-                return BadRequest();
-            }
-
-            var customer = await _unitOfWork.Customers.Get(q => q.Id == id);
-            if (customer == null)
-            {
-                _logger.LogError($"Invalid delete attempt in {nameof(DeleteCustomer)}");
-                return BadRequest("Submitted data is invalid");
-            }
-
-            await _unitOfWork.Customers.Delete(id);
             await _unitOfWork.Save();
 
             return NoContent();

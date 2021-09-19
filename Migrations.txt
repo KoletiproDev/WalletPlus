@@ -1,0 +1,3 @@
+add-migration InitModel -c DatabaseContext -o Migrations
+
+update-database

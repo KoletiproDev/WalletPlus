@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 using System;
+using WalletPlus.Data;
 
 namespace WalletPlus.Api
 {
@@ -20,7 +22,17 @@ namespace WalletPlus.Api
             try
             {
                 Log.Information("Application Is Starting");
-                CreateHostBuilder(args).Build().Run();
+
+                var host = CreateHostBuilder(args).Build();
+
+                using (var scope = host.Services.CreateScope())
+                {
+                    var services = scope.ServiceProvider;
+                    var context = services.GetService<DatabaseContext>();
+                    Seeder.Seed(context);
+                }
+
+                host.Run();
             }
             catch (Exception ex)
             {
