@@ -8,7 +8,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using WalletPlus.Common.Entities;
+using WalletPlus.Common.Exceptions;
 using WalletPlus.Common.IRepository;
+using WalletPlus.Common.IService;
 using WalletPlus.Common.Models;
 
 namespace WalletPlus.Api.Controllers
@@ -17,16 +19,14 @@ namespace WalletPlus.Api.Controllers
     [ApiController]
     public class CustomersController : ControllerBase
     {
-        private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<CustomersController> _logger;
-        private readonly IMapper _mapper;
+        private readonly ICustomerService _customerService;
 
-        public CustomersController(IUnitOfWork unitOfWork, ILogger<CustomersController> logger,
-            IMapper mapper)
+        public CustomersController(ILogger<CustomersController> logger,
+            ICustomerService customerService)
         {
-            _unitOfWork = unitOfWork;
             _logger = logger;
-            _mapper = mapper;
+            _customerService = customerService;
         }
 
         [HttpGet]
@@ -36,29 +36,27 @@ namespace WalletPlus.Api.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetCustomers([FromQuery] RequestParams requestParams)
         {
-            var customers = await _unitOfWork.Customers.GetPagedList(requestParams, include: q => q.Include(x => x.Wallets).Include(x => x.Transactions));
-            var results = _mapper.Map<IList<CustomerModel>>(customers);
+            var results = await _customerService.GetCustomers(requestParams);
             return Ok(results);
         }
 
-        //[HttpGet("{id:Guid}", Name = "GetCustomer")]
-        //[ResponseCache(CacheProfileName = "120SecondsDuration")]
-        //[ProducesResponseType(StatusCodes.Status200OK)]
-        //[ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        //public async Task<IActionResult> GetCustomer(Guid id)
-        //{
-        //    var customer = await _unitOfWork.Customers.Get(q => q.Id == id, include: q => q.Include(x => x.Wallets));
-        //    var result = _mapper.Map<CustomerModel>(customer);
-        //    return Ok(result);
-        //}
+        [ApiExplorerSettings(IgnoreApi = true)]
+        [HttpGet("{id:Guid}", Name = "GetCustomer")]
+        [ResponseCache(CacheProfileName = "120SecondsDuration")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetCustomer(Guid id)
+        {
+            var result = await _customerService.GetCustomer(id);
+            return Ok(result);
+        }
 
         [HttpGet("{customerId:Guid}/transactions", Name = "GetCustomerTransactions")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetCustomerTransactions(Guid customerId)
         {
-            var transactions = await _unitOfWork.Transactions.GetAll(c=> c.CustomerId == customerId || c.BeneficiaryCustomerId == customerId, include: q => q.Include(x => x.Customer).Include(x=> x.BeneficiaryCustomer));
-            var results = _mapper.Map<IList<TransactionModel>>(transactions);
+            var results = await _customerService.GetCustomerTransactions(customerId);
             return Ok(results);
         }
 
@@ -74,45 +72,16 @@ namespace WalletPlus.Api.Controllers
                 return BadRequest(ModelState);
             }
 
-            var customer = _mapper.Map<Customer>(customerModel);
-
-            customer.Id = Guid.NewGuid();
-            customer.Active = true;
-
-            await _unitOfWork.Customers.Insert(customer);
-
-            //create wallet
-            var transactionWallet = new Wallet
-            {
-                Id = Guid.NewGuid(),
-                CustomerId = customer.Id,
-                Type = WalletTypeEnum.Transactional,
-                Amount = 0,
-                CreatedDate = DateTime.Now 
-            };
-            await _unitOfWork.Wallets.Insert(transactionWallet);
-
-            var pointWallet = new Wallet
-            {
-                Id = Guid.NewGuid(),
-                CustomerId = customer.Id,
-                Type = WalletTypeEnum.Point,
-                Amount = 0,
-                CreatedDate = DateTime.Now
-            };
-            await _unitOfWork.Wallets.Insert(pointWallet);
-
-            await _unitOfWork.Save();
+            var customer = await _customerService.CreateCustomer(customerModel);
 
             return CreatedAtRoute("GetCustomer", new { id = customer.Id }, customer);
-
         }
 
         [HttpPut("{id:guid}")]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> UpdateCustomer(Guid id, [FromBody] UpdateCustomerModel customerModel)
+        public async Task<IActionResult> UpdateCustomer(Guid id, [FromBody] UpdateCustomerModel updateCustomerModel)
         {
             if (!ModelState.IsValid || id == Guid.Empty)
             {
@@ -120,16 +89,15 @@ namespace WalletPlus.Api.Controllers
                 return BadRequest(ModelState);
             }
 
-            var customer = await _unitOfWork.Customers.Get(q => q.Id == id);
-            if (customer == null)
+            try
+            {
+                await _customerService.UpdateCustomer(id, updateCustomerModel);
+            }
+            catch(WalletException ex)
             {
                 _logger.LogError($"Invalid update attempt in {nameof(UpdateCustomer)}");
-                return BadRequest("Submitted data is invalid");
+                return BadRequest(ex.Message);
             }
-
-            _mapper.Map(customerModel, customer);
-            _unitOfWork.Customers.Update(customer);
-            await _unitOfWork.Save();
 
             return NoContent();
 

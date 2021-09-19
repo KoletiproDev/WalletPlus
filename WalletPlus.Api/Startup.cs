@@ -7,8 +7,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
+using WalletPlus.Api.Services;
 using WalletPlus.Common;
 using WalletPlus.Common.IRepository;
+using WalletPlus.Common.IService;
 using WalletPlus.Data;
 using WalletPlus.Data.Repository;
 
@@ -64,6 +66,9 @@ namespace WalletPlus.Api
                 Newtonsoft.Json.ReferenceLoopHandling.Ignore);
 
             services.ConfigureVersioning();
+
+            services.AddScoped<ICustomerService, CustomerService>();
+            services.AddScoped<ITransactionService, TransactionService>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
